@@ -21,7 +21,9 @@ Mach is planned for release on Groundwire’s Arvo distribution in a 407k versio
 
 Groundwire needs to read the Bitcoin blockchain in order to populate its Urbit PKI. This requires at minimum a Bitcoin light client running on the ship, which we have at the `gwbtc/node` repo. In our current implementation this desk’s `%bitcoin-client` agent talks to another agent, `%tcp-sidecar`, which is itself just a passthrough ￼￼￼via Lick to a TCP sidecar written in C. In practice getting this sidecar installed for end-users, keeping it alive across Vere lifecycles, and securing this pipeline is unacceptably complex.
 
-A TCP client vane will allow an agent like `%bitcoin-client` to communicate directly with some known Bitcoin node and handle the lifecycle in its own application logic.
+Urbit has depended on sidecars to communicate with two kinds of thing: an external process such as a local LLM, which was obviated by Lick, and any kind of crypto wallet software. Urbit's original Bitcoin wallet relied on a three-part stack of `%btc-wallet` (the logical agent) `%btc-provider` (an interface to the sidecar) and `bitcoin-rpc`, which caused issues like [subscribed ships slowing down](https://github.com/urbit/urbit/issues/5072) to [becoming inoperable](https://github.com/urbit/landscape-archive/issues/792#issuecomment-870107217) because of bad transactions between ships and their sidecars.
+
+A TCP client vane will mitigate against these kinds of issues in two ways: allowing Gall agents to interact directly with remote peers over TCP, not a brittle sidecar process, and setting sensible constraints on how those agents and peers can interact with eachother.
 
 ### TCP Server
 
@@ -33,7 +35,7 @@ In its first release, Mach SHALL be a minimal interface to a TCP driver in the r
 
 ### Interface
 
-Mach assumes a `$fief` — an IP address or domain name — which is included in Groundwire’s Lull.
+Mach assumes the existence of a `$fief` type — an IP address or domain name — which is included in Groudwire's Lull and could be upstreamed for this PR if needed.
 
 ```hoon
 +$  fief
@@ -52,7 +54,7 @@ Mach assumes a `$fief` — an IP address or domain name — which is included in
     $?  %tls                                            ::  failed tls
         %dead                                           ::  peer not answering keepalive
         %reset                                          ::  connection reset
-        %reborn                                         ::  connection rest on new unix process
+        %reset                                          ::  reset
         %refused                                        ::  peer refused us
         %timeout                                        ::  connect timed out
         %overflowed                                     ::  exceeded queue
