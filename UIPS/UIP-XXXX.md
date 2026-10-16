@@ -52,11 +52,12 @@ Mach assumes the existence of a `$fief` type â€” an IP address or domain name â€
   |%
   +$  wye
     $?  %tls                                            ::  failed tls
-        %dead                                           ::  peer not answering keepalive
-        %reset                                          ::  connection reset
+        %dead                                           ::  peer idle
+        %done                                           ::  closed without error
         %reset                                          ::  reset
+        %reborn                                         ::  new unix process
         %refused                                        ::  peer refused us
-        %timeout                                        ::  connect timed out
+        %timeout                                        ::  %connect timeout
         %overflowed                                     ::  exceeded queue
         %unresolved                                     ::  address did not resolve
     ==
@@ -71,13 +72,13 @@ Mach assumes the existence of a `$fief` type â€” an IP address or domain name â€
         [%close ~]                                      ::  close this connection
         [%opened id=@ud]                                ::  vere opened conn.
         [%received id=@ud =octs]                        ::  vere received bytes
-        [%closed id=@ud p=(unit wye)]                   ::  vere closed this connection
+        [%closed id=@ud p=wye]                          ::  vere closed this connection
     ==
   ::
   +$  gift
     $%  [%connected ~]                                  ::  connection opened
         [%received =octs]                               ::  received bytes
-        [%closed p=(unit wye)]                          ::  connection closed
+        [%closed p=wye]                                 ::  connection closed
         [%connect id=@ud secure=? =fief]                ::  vere, open connection
         [%send id=@ud =octs]                            ::  vere, send bytes
         [%close id=@ud]                                 ::  vere, close connection
