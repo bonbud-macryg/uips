@@ -19,11 +19,13 @@ Mach is planned for release on Groundwire’s Arvo distribution in a 407k versio
 
 ## Motivation
 
-Groundwire needs to read the Bitcoin blockchain in order to populate its Urbit PKI. This requires at minimum a Bitcoin light client running on the ship, which we have at the `gwbtc/node` repo. In our current implementation this desk’s `%bitcoin-client` agent talks to another agent, `%tcp-sidecar`, which is itself just a passthrough ￼￼￼via Lick to a TCP sidecar written in C. In practice getting this sidecar installed for end-users, keeping it alive across Vere lifecycles, and securing this pipeline is unacceptably complex.
+Groundwire needs to read the Bitcoin blockchain in order to populate its Urbit PKI. This requires at minimum a Bitcoin light client running on the ship, which we have at the `gwbtc/node` repo. In our current implementation this desk’s `%bitcoin-client` agent talks to another agent, `%tcp-sidecar`, which is itself just a passthrough via Lick to a TCP sidecar written in C. In practice getting this sidecar set up for end-users, keeping it alive across Vere lifecycles, and securing this pipeline is unacceptably complex and unreliable. This approach is a non-starter if we want end-users' Urbit ships to be portable across host machines.
 
 Urbit has depended on sidecars to communicate with two kinds of thing: an external process such as a local LLM, which was obviated by Lick, and any kind of crypto wallet software. Urbit's original Bitcoin wallet relied on a three-part stack of `%btc-wallet` (the logical agent) `%btc-provider` (an interface to the sidecar) and `bitcoin-rpc`, which caused issues like [subscribed ships slowing down](https://github.com/urbit/urbit/issues/5072) to [becoming inoperable](https://github.com/urbit/landscape-archive/issues/792#issuecomment-870107217) because of bad transactions between ships and their sidecars.
 
 A TCP client vane will mitigate against these kinds of issues in two ways: allowing Gall agents to interact directly with remote peers over TCP, not a brittle sidecar process, and setting sensible constraints on how those agents and peers can interact with eachother.
+
+Few Bitcoin nodes support JSON RPC and there is no reliable oracle to discover such nodes. An Urbit that does not support TCP natively forces us to take one of two options: either hard-code one or more Bitcoin RPC nodes that everyone contacts (much the same situation we are in now with Tlon's Infura endpoint for Ethereum) or force some/all users to run sidecars to enable RPC, which is what `bitcoin-rpc` was for. The only reliable, non-centralizing approach is for Urbit to be able to speak the languages of the networks we want it to talk to.
 
 ### TCP Server
 
