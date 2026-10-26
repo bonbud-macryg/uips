@@ -171,7 +171,7 @@ Our goals are to ensure as much continuity as possible between Groundwire Alpha 
 
 ## Reference Implementation
 
-{XX - will be updated with links to PRs in `gwbtc/...` repos}
+See pull requests [`urbit/urbit#7437`](https://github.com/urbit/urbit/pull/7437) and [`urbit/vere#1149`](https://github.com/urbit/vere/pull/1149) for the current implementation.
 
 ## Security Considerations
 
