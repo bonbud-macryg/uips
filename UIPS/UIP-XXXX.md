@@ -37,31 +37,61 @@ In its first release, Mach SHALL be a minimal interface to a TCP driver in the r
 
 ### Interface
 
-Mach assumes the existence of a `$fief` type — an IP address or domain name — which is included in Groudwire's Lull and could be upstreamed for this PR if needed.
+Mach depends on a new `$fief` type (an IP address or list of domain names) which is included in `gwbtc/urbit`'s Lull and is upstreamed for this PR.
 
 ```hoon
 +$  fief
-  $%  [%turf p=(list turf) q=@ud]
-      [%if p=@if q=@ud]
-      [%is p=@is q=@ud]
+  $%  [%turf p=(list turf) q=@ud]                       ::  domains
+      [%if p=@if q=@ud]                                 ::  IPv4
+      [%is p=@is q=@ud]                                 ::  IPv6
   ==
 ```
 
+The `%turf` case lists several domains because a user may bind to more than one, e.g. `.arvo.network`, `.startram.io`, and their own `.sampel-palnet.computer`. Service providers for one or more of these domains may be unavailable at any given time. Given multiple domains, Mach's driver will attempt to resolve all of them concurrently (see Runtime).
+
 #### Tasks, gifts
+
+An outgoing TCP connection MAY close for a number of reasons. A `$wye` namespaces those reasons, and Gall agents MAY branch on error conditions with `?-(-.wye ...)` or `?=([%tls %certificate] wye)`.
 
 ```hoon
 ++  mach  ^?
   |%
+  ::  $wye: why a connection closed
+  ::  by category, then cause
+  ::
   +$  wye
-    $?  %tls                                            ::  failed tls
-        %dead                                           ::  peer idle
-        %done                                           ::  closed without error
-        %reset                                          ::  reset
-        %reborn                                         ::  new unix process
-        %refused                                        ::  peer refused us
-        %timeout                                        ::  %connect timeout
-        %overflowed                                     ::  exceeded queue
-        %unresolved                                     ::  address did not resolve
+    $%  $:  %connect                                    ::  never opened
+            $=  p
+            $?  %invalid                                ::  malformed $fief
+                %unresolved                             ::  no domain resolved
+                %refused                                ::  every address failed
+                %timeout                                ::  not open in time
+        ==  ==
+        $:  %tls                                        ::  tls failed
+            $=  p
+            $?  %invalid                                ::  invalid domain
+                %certificate                            ::  failed verification
+                %handshake                              ::  failed handshake
+                %decode                                 ::  bad tls records
+        ==  ==
+        $:  %peer                                       ::  peer ended it
+            $=  p
+            $?  %done                                   ::  peer closed cleanly
+                %reset                                  ::  reset or r/w failed
+                %dead                                   ::  keepalive timeout
+        ==  ==
+        $:  %close                                      ::  userspace ended it
+            $=  p
+            $?  %done                                   ::  flushed outgoing
+                %timeout                                ::  unsent after timeout
+        ==  ==
+        $:  %local                                      ::  arvo/vere ended it
+            $=  p
+            $?  %reborn                                 ::  vere restarted
+                %trimmed                                ::  dropped on %trim
+                %dropped                                ::  %received failed
+                %overflowed                             ::  send queue full
+        ==  ==
     ==
   ::
   +$  task
@@ -69,16 +99,16 @@ Mach assumes the existence of a `$fief` type — an IP address or domain name �
     $%  $>(%born vane-task)                             ::  new unix process
         $>(%trim vane-task)                             ::  trim state
         $>(%vega vane-task)                             ::  report upgrade
+        [%close ~]                                      ::  close connection
+        [%send =octs]                                   ::  send bytes
         [%connect secure=? =fief]                       ::  connect to address
-        [%send =octs]                                   ::  send on this connection
-        [%close ~]                                      ::  close this connection
-        [%opened id=@ud]                                ::  vere opened conn.
-        [%received id=@ud =octs]                        ::  vere received bytes
-        [%closed id=@ud p=wye]                          ::  vere closed this connection
+        [%opened id=@ud p=(unit turf)]                  ::  opened this domain
+        [%closed id=@ud p=wye]                          ::  closed because...
+        [%received id=@ud =octs]                        ::  received bytes
     ==
   ::
   +$  gift
-    $%  [%connected ~]                                  ::  connection opened
+    $%  [%connected p=(unit turf)]                      ::  opened, via turf
         [%received =octs]                               ::  received bytes
         [%closed p=wye]                                 ::  connection closed
         [%connect id=@ud secure=? =fief]                ::  vere, open connection
@@ -90,30 +120,36 @@ Mach assumes the existence of a `$fief` type — an IP address or domain name �
 
 #### Scries
 
-* `/ma/connections` — list open connections
-* `/md/owner/<connection>` — get agent that opened this connection
-* `/mu/<connection>` — does this connection exist
+* `/ma/connections`: list open connections
+* `/md/owner/<connection>`: the duct that opened this connection
+* `/mu/<connection>`: does this connection exist
 
 ### Lifecycle
 
 Upon first installation, Mach MUST initialize a default `//mach` duct as bunt `unix-duct=_[//mach ~]`, as Lick does.
 
-On `%born`, Mach MUST drop all outgoing connections, as Iris and Lick do, and tell the Gall agents that own them about these dropped connections with `%reborn`. Once Gall resource tracking is implemented, Gall SHOULD tell Mach to clean up an agent’s outgoing connections when the agent is nuked.
+On `%born`, Mach MUST drop all outgoing connections, as Iris and Lick do, and tell the Gall agents that own them about these dropped connections with `[%local %reborn]`. On `%trim`, Mach MUST close every connection, telling each owner with `[%local %trimmed]` and the driver with `%close`. Once Gall resource tracking is implemented, Gall SHOULD tell Mach to clean up an agent’s outgoing connections when the agent is nuked.
 
 ### Runtime
 
-In its first release the Mach vane is a minimal interface with the TCP driver. All congestion control, bindings, timeouts, etc. MUST be specified as hard-coded constants in the driver. The driver MUST limit the size of each receive event, and maintain per-connection queues where one `%received` gift is in transit per connection until Arvo has committed it to the event log.
+In its first release the Mach vane is a minimal interface with the TCP driver. All congestion control, bindings, timeouts, etc. MUST be specified as hard-coded constants in the driver. The driver MUST limit the size of each receive event, and maintain per-connection queues where one `%received` gift is in transit per connection until Arvo has completed it. If Vere crashes before the event is written to disk, the event is lost, and on restart `%born` closes the connection with `[%local %reborn]`, so an agent never sees an interrupted bytestream.
 
 The driver MUST enforce the following constraints:
 * `%received` events MUST carry no more than 1 MiB
-* Per-connection queues MUST be capped at 64 MiB, failing with `%overflow`
-* Connections MUST be closed with a 30 second drain limit
-* Outgoing connection attempts MUST have a timeout of 30 seconds
-* Peers MAY remain idle for 120 seconds before the driver sends a keepalive probe, with libuv enforcing probe intervals and max. attempts consistently across platforms; Gall agents MAY implement their own keepalive pings within that 120-second window if they wish
+* The outgoing queue MUST be capped at 64 MiB, closing the connection with `[%local %overflowed]` on overflow
+* When the incoming queue reaches 64 MiB, the driver MUST stop reading from the socket until Arvo has drained it to 32 MiB, leaving flow control to TCP
+* Outgoing connection attempts MUST have a timeout of 30 seconds, covering DNS, TCP connect, and the TLS handshake
+* On `%close`, the driver SHALL stop delivering received bytes, flush the outgoing queue, and close with `[%close %done]`, or with `[%close %timeout]` after a 30 second drain limit
+* The driver MUST specify TCP keepalive with hard-coded timing applied consistently on every host platform: 120 seconds idle before the first probe, 10 seconds between probes, and 6 unanswered probes before closing with `[%peer %dead]`
+* The driver MUST close with `[%peer %dead]` when sent data stays unacknowledged for 180 seconds, on every host platform; the host platform MAY close such a connection sooner
 
-The above constraints protect from resource exhaustion and make Arvo and Vere behaviour consistent across host platforms. Conversely, the driver SHALL run with `TCP_NODELAY` on, such that batching is left to the agents and peers that understand whichever protocol they’re communicating over.
+The keepalive timing is an upper bound. If a Gall agent needs faster detection, or its protocol requires its own ping (Bitcoin P2P, MQTT, IRC, WebSocket), the agent MAY send pings over the connection and `%close` it early when they go unanswered.
 
-The driver SHALL connect to peers over h2o, which is already a Vere dependency in `http.c` and `cttp.c`. For a plain connection, the driver resolves the address with `uv_getaddrinfo`, tries each result in order with `h2o_socket_connect`, and reads and writes through the appropriate `h2o_socket_*` functions. For a `secure=&` connection, the driver calls `h2o_socket_ssl_handshake` with the hostname after connecting, with h2o verifying the TLS certificate for us.
+The above constraints protect from resource exhaustion, make Arvo and Vere behavior consistent across host platforms, and place constraints on what Gall agents can do with TCP. Conversely, the driver SHALL run with `TCP_NODELAY` on, such that batching is left to the agents and peers that understand whichever protocol they’re communicating over.
+
+The driver SHALL connect with libuv, following RFC 8305 (Happy Eyeballs) if the agent passes a list of domains. One 30-second budget covers every attempt to connect to every domain; if every lookup and attempt fails sooner, the driver closes with `[%connect %refused]` if any domain resolved, else `[%connect %unresolved]`.
+
+For a `secure=&` connection, it SHALL hand the connected socket to h2o and call `h2o_socket_ssl_handshake()` with the domain that connected, and SHALL verify that the certificate names that domain. The Mach driver's dependency on h2o is an interim step, used just for TLS. It hides the read error code, so on a TLS connection a reset or dead peer closes with `[%peer %done]`, not `[%peer %reset]` or `[%peer %dead]`. Driving OpenSSL over libuv directly would fix this and give every connection one read and write path, and this will replace h2o once the security implications are more well understood.
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in RFC 2119 and RFC 8174.
 
@@ -141,9 +177,7 @@ Our goals are to ensure as much continuity as possible between Groundwire Alpha 
 
 Mach’s initial release will only allow Gall agents to connect to outside servers, never the other way around. The runtime driver’s tasks are only accepted from the `//mach` duct. We defer to the Gall Working Group’s userspace permissions system to manage which agents and desks can pass tasks to Mach.
 
-Mach will not include Transport Layer Security (TLS) in its first release, as this is not necessary for its initial goal of talking to a Bitcoin fullnode. Putting TLS in the driver will be a requirement for talking to most Earth servers that have not been built with Mach in mind. TLS will be implemented before Mach’s upstream PRs are opened. The driver will rely on Vere’s h2o dependency for TLS.
-
-TLS connections will be verified against the certificates embedded in Vere, the same Iris uses for HTTPS. TLS connections (`secure=&`) will only be valid if the given `$fief` is a `%turf`, and Mach will reject `%connect` tasks from userspace on this basis.
+Mach supports TLS in its first release. The driver uses Vere’s h2o dependency for TLS, requires TLS 1.2 or later, and verifies certificates against the certificates embedded in Vere, the same Iris uses for HTTPS. TLS connections (`secure=&`) are only valid if the given `$fief` is a `%turf`, and Mach rejects other `%connect` tasks with `[%tls %invalid]`.
 
 As with Iris, any Gall agent can reach any TCP endpoint the host OS can, including loopback. This is a userspace security question and out-of-scope for this UIP.
 
