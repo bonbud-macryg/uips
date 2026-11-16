@@ -135,7 +135,8 @@ In its first release the Mach vane is a minimal interface with the Mach driver. 
 
 The driver MUST enforce the following constraints. Most of these were taken from the TCP sidecar that Mach replaces, and others were picked to be generous enough for userspace to implement protocols within. These constraints are simple constants that MAY be tweaked in response to the needs of userspace developers.
 
-* `%received` events MUST carry no more than 4 MiB. The driver reads with a 4 MiB buffer and asks the host for a 4 MiB `SO_RCVBUF`, so a stream arrives in the fewest, biggest Arvo events. (4 MiB is a little bigger than most Bitcoin blocks, increasing the buffer size to 16 MiB showed no performance improvement over 4 MiB. No more precise benchmarking has been done yet.) The host can grant less: Linux caps `SO_RCVBUF` at `net.core.rmem_max`, about 208 KiB by default, but this can be changed with a terminal command
+* The driver SHOULD give each connection the largest receive buffer its host allows. That buffer caps both the TCP window and how many bytes one read can take. A host's TCP stack autotunes the buffer up to one limit when the application leaves it alone; an explicit `SO_RCVBUF` gets up to a second limit, which root can raise, and turns autotuning off. At startup the driver reads both limits, and asks for `SO_RCVBUF` only where the second is higher. On a stock macOS host it asks for 8 MiB (`kern.ipc.maxsockbuf`), since autotuning stops at 4 MiB (`net.inet.tcp.autorcvbufmax`). On a stock Linux host it asks for nothing, since `net.core.rmem_max` (about 208 KiB) is far below the autotuning limit in `net.ipv4.tcp_rmem` (6 MB on most kernels, 32 MB on the newest). On a host whose limits it cannot read, the driver leaves the buffer alone
+* `%received` events MUST carry no more than the receive buffer limit the driver chose. The driver reads with a buffer that size, so one event can take all the kernel holds, and a stream arrives in the fewest, biggest Arvo events. Where the driver cannot read the host's limits, events carry no more than 16 MiB. In benchmarks on macOS, an 8 MiB buffer and 8 MiB events ran about 10% faster than 4 MiB over loopback, and raised throughput over a 100 ms round trip from 35 to 62 MiB/s
 * The driver MUST NOT read from the socket while a `%received` event is in transit, leaving flow control to TCP
 * The driver MUST manage outgoing bytes the host's TCP module has not yet taken, since Arvo has already committed the `%send` to the log. It MAY leave this queue to libuv. Gall agents MAY `%send` any number of bytes, but the driver MUST close the connection with `[%local %overflowed]` once more than 16 MiB wait to be sent
 * Outgoing connection attempts MUST time out after 30 seconds, closing with `[%connect %timeout]`
@@ -181,7 +182,15 @@ An early draft of Mach supported TLS in a case where the agent tried to `%connec
 
 As with Iris, any Gall agent can reach any TCP endpoint the host OS can, including loopback. This is a userspace security question and out-of-scope for this UIP.
 
-The Mach driver's hard-coded constraints protect from incoming DoS attacks by limiting how much memory a remote peer can allocate on the host OS: around 8 MiB per connection (one 4 MiB event in transit, and up to 4 MiB in the host's receive buffer) with a 180-second timeout. Mach also caps each connection's unsent outgoing bytes at 16 MiB, but like Iris it does not prevent a Gall agent from opening as many connections as it likes. The 16 MiB limit is generous enough to enable many use-cases (e.g. Bitcoin blocks) but will overflow in the case where a malicious or broken agent spams the connection with outgoing messages. Once userspace permissions are implemented, it is up to the user to be careful about which desks they allow to use Mach to allocate resources on their machine. These kinds of questions around resource allocation on the host machine will be the main concern in any effort to upgrade Mach to a general-purpose TCP client/server vane.
+The Mach driver's hard-coded constraints protect from incoming DoS attacks by limiting how much memory a remote peer can allocate on the host OS: one event in transit per connection, plus the host's receive buffer, each no bigger than the receive buffer limit, with a 180-second timeout. That comes to about twice the limit per connection: 16 MiB on a stock macOS host, about 12 MiB on most Linux kernels, and about 64 MiB on the newest. A host that raises its limits raises this bound with them.
+
+Mach also caps each connection's unsent outgoing bytes at 16 MiB, but like Iris it does not prevent a Gall agent from opening as many connections as it likes.
+
+The 16 MiB limit is generous enough to enable many use-cases (e.g. Bitcoin blocks) but will overflow in the case where a malicious or broken agent spams the connection with outgoing messages.
+
+Once userspace permissions are implemented, it is up to the user to be careful about which desks they allow to use Mach to allocate resources on their machine.
+
+These kinds of questions around resource allocation on the host machine will be the main concern in any effort to upgrade Mach to a general-purpose TCP client/server vane.
 
 ## Copyright
 
